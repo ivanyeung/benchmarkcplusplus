@@ -244,15 +244,22 @@ def cleanup_cgroups():
 # --------------------------------------------------------------------------- #
 # fio launching
 # --------------------------------------------------------------------------- #
-def fio_cmd(name, cg, filename, phase, out_json, runtime):
+def fio_cmd(name, cg, filename, phase, out_json, runtime, loops=None):
     parts = [
         "fio", f"--name={name}", f"--filename={filename}",
         f"--rw={phase['pattern']}", f"--bs={phase['block_size']}",
         f"--iodepth={phase['iodepth']}", f"--ioengine={phase['ioengine']}",
-        f"--numjobs={phase['numjobs']}", f"--runtime={runtime}",
-        "--time_based", "--direct=0", "--group_reporting",
+        f"--numjobs={phase['numjobs']}",
+        "--direct=0", "--group_reporting",
         "--output-format=json", f"--output={out_json}",
     ]
+    if loops:
+        # Fixed number of complete passes over the file; NO wall-clock cap.
+        # (--time_based would override --loops, so we omit both it and --runtime.)
+        parts.append(f"--loops={loops}")
+    else:
+        # Time-based: run for `runtime` seconds, looping over the file as needed.
+        parts += [f"--runtime={runtime}", "--time_based"]
     if phase.get("rate_iops"):
         parts.append(f"--rate_iops={phase['rate_iops']}")
     fio = " ".join(parts)
@@ -262,7 +269,7 @@ def fio_cmd(name, cg, filename, phase, out_json, runtime):
             f"echo $$ > {CG}/{cg}/cgroup.procs; exec {fio} > /dev/null 2>&1"]
 
 
-def run_phase(idx, p1, p2, files, outdir, runtime):
+def run_phase(idx, p1, p2, files, outdir, runtime, loops=None):
     j1 = f"{outdir}/phase{idx}_client1.json"
     j2 = f"{outdir}/phase{idx}_client2.json"
 
@@ -270,8 +277,8 @@ def run_phase(idx, p1, p2, files, outdir, runtime):
 
     t0 = time.time()
     procs = [
-        subprocess.Popen(fio_cmd("client1", CGROUPS["client1"], files["client1"], p1, j1, runtime)),
-        subprocess.Popen(fio_cmd("client2", CGROUPS["client2"], files["client2"], p2, j2, runtime)),
+        subprocess.Popen(fio_cmd("client1", CGROUPS["client1"], files["client1"], p1, j1, runtime, loops)),
+        subprocess.Popen(fio_cmd("client2", CGROUPS["client2"], files["client2"], p2, j2, runtime, loops)),
     ]
     for pr in procs:
         pr.wait()
@@ -282,7 +289,8 @@ def run_phase(idx, p1, p2, files, outdir, runtime):
     stats = {"phase": idx, "duration_s": dur, "before": before, "after": after}
     with open(f"{outdir}/phase{idx}_stats.json", "w") as f:
         json.dump(stats, f, indent=2)
-    print(f"  phase {idx}: done in {dur}s  "
+    mode = f"{loops} loops" if loops else f"{runtime}s"
+    print(f"  phase {idx}: done in {dur}s [{mode}]  "
           f"(client1={p1['pattern']}@{p1.get('rate_iops') or 'max'} iops, "
           f"client2={p2['pattern']}@{p2.get('rate_iops') or 'max'} iops)")
 
@@ -355,7 +363,12 @@ def main():
     ap.add_argument("--c1-size", default=None, help="override client1 file size (e.g. 256M)")
     ap.add_argument("--c2-size", default=None, help="override client2 file size (e.g. 8G)")
     ap.add_argument("--runtime", type=int, default=None,
-                    help="override per-phase runtime in seconds")
+                    help="override per-phase runtime in seconds (time-based mode)")
+    ap.add_argument("--loops", type=int, default=None,
+                    help="run a FIXED number of complete passes over each file per "
+                         "phase instead of time-based looping. Disables --time_based/"
+                         "--runtime; rate_iops caps still apply. Phase ends when both "
+                         "clients finish their passes. e.g. --loops 3")
     ap.add_argument("--cold-drop", action="store_true",
                     help="drop caches ONCE before phase 1 (never between phases)")
     args = ap.parse_args()
@@ -403,6 +416,7 @@ def main():
         "cgroups": {"client1": CGROUPS["client1"], "client2": CGROUPS["client2"]},
         "mem_caps": mem_caps,
         "pinned": bool(args.pin),
+        "loops": args.loops,
         "files": files, "c1_size": c1_size, "c2_size": c2_size,
         "nphases": nphases,
         "client1_phases": p1_phases, "client2_phases": p2_phases,
@@ -427,7 +441,7 @@ def main():
             p1 = p1_phases[min(i, len(p1_phases) - 1)]
             p2 = p2_phases[min(i, len(p2_phases) - 1)]
             rt = args.runtime or int(p1["runtime"])
-            run_phase(i, p1, p2, files, args.output, rt)
+            run_phase(i, p1, p2, files, args.output, rt, args.loops)
     finally:
         iostat.terminate()
         iostat.wait()

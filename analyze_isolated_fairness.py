@@ -118,6 +118,9 @@ def main():
     print(f"  client2 cgroup: {meta['cgroups']['client2']}  "
           f"(mem cap = {meta['mem_caps']['client2']})")
     print(f"  cpu pinning   : {'on' if meta.get('pinned') else 'off'}")
+    run_mode = (f"{meta['loops']} loops/phase (fixed passes)"
+                if meta.get("loops") else "time-based")
+    print(f"  run mode      : {run_mode}")
     print(f"  client1 file  : {meta['files']['client1']}  ({meta['c1_size']})")
     print(f"  client2 file  : {meta['files']['client2']}  ({meta['c2_size']})")
     print(f"  phases        : {nphases}   (no drop_caches between phases)")

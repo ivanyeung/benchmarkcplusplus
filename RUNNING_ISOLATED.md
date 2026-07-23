@@ -63,7 +63,8 @@ client2 = 32G bursty reader, three 30 s phases).
 | `--c1-mem` / `--c2-mem` | override the cap per client | `--c1-mem 256M --c2-mem 256M` |
 | `--pin` | give each client its own dedicated CPU cores (auto-split) | `--pin` |
 | `--c1-size` / `--c2-size` | override client file sizes | `--c1-size 2G --c2-size 32G` |
-| `--runtime` | per-phase seconds (overrides the ini) | `--runtime 60` |
+| `--runtime` | per-phase seconds, time-based (overrides the ini) | `--runtime 60` |
+| `--loops` | **fixed passes** over each file per phase, instead of time-based looping (disables `--runtime`/`--time_based`; `rate_iops` caps still apply) | `--loops 3` |
 | `--data-dir` | directory for the test files (created if absent) | `--data-dir /srv/pcf_data` |
 | `--cold-drop` | drop caches once before phase 1 (never between) | `--cold-drop` |
 | `--skip-build` | skip the automatic `make` step | `--skip-build` |
