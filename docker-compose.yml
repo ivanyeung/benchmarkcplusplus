@@ -1,0 +1,58 @@
+# Docker setup for the Page Cache Fairness Benchmark.
+#
+# Usage:
+#   docker compose build                 # build the image once
+#   docker compose run --rm bench        # default: build + dual-client test (no cgroups)
+#   docker compose run --rm bench bash -lc "make clean && make && ./fairness_benchmark all"
+#   docker compose run --rm bench ./quick_fairness_analysis.py fairness_results/
+#
+# IMPORTANT — architecture collision via the bind mount:
+#   The repo is mounted into the container, so binaries built on the host (macOS
+#   = Mach-O) and inside the container (Linux = ELF) share the same filenames and
+#   clobber each other. `make` sees a fresh timestamp and refuses to rebuild the
+#   wrong-arch binary. Always `make clean && make` when switching between running
+#   on the host and in the container (the default command does this for you).
+#
+# WHY THE SETTINGS BELOW MATTER (benchmark-specific):
+#
+#  * privileged: true
+#      The benchmark clears the page cache between runs via
+#      `echo 3 > /proc/sys/vm/drop_caches`. That path is read-only in an
+#      unprivileged container, so WITHOUT this the cache is never reset and the
+#      cached-vs-direct comparison is contaminated (it silently no-ops).
+#      Privileged is also required for the cgroup v2 isolation experiments.
+#
+#  * mem_limit / VM sizing
+#      The page cache lives in the Linux kernel that Docker runs. On macOS that
+#      is a shared lightweight VM whose RAM is set in Docker Desktop settings
+#      (Settings -> Resources). The "steady workload fits in cache, bursty does
+#      not" premise depends on that VM having enough RAM. Give the VM >= 8 GB.
+#      mem_limit below caps THIS container; it does not enlarge the VM.
+#
+#  * volume mount
+#      Binds the repo into the container so binaries, the ~17 GB test files, and
+#      fairness_results/ all live on the host. Ensure Docker's disk allocation
+#      covers the test files.
+
+services:
+  bench:
+    build: .
+    image: pagecache-fairness
+    # Needed for /proc/sys/vm/drop_caches and cgroup v2 writes. See note above.
+    privileged: true
+    # Share the host cgroup namespace so the container sees and can manage the
+    # REAL cgroup v2 tree at /sys/fs/cgroup. Without this, Docker gives the
+    # container a private namespace whose root cannot enable controllers
+    # (cgroup.subtree_control / memory.max writes get EACCES) — which breaks the
+    # --cgroup-config fairness runs. Combined with privileged, this makes
+    # /sys/fs/cgroup writable. Only needed for the cgroup experiments.
+    cgroup: host
+    # Cap this container's memory. Raise the VM's RAM in Docker Desktop settings
+    # separately if the cache-fit premise needs more headroom.
+    mem_limit: 8g
+    volumes:
+      - .:/work
+    working_dir: /work
+    # Keep stdin/tty so interactive `docker compose run` sessions behave.
+    stdin_open: true
+    tty: true
