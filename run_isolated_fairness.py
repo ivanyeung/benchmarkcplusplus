@@ -244,9 +244,9 @@ def cleanup_cgroups():
 # --------------------------------------------------------------------------- #
 # fio launching
 # --------------------------------------------------------------------------- #
-def fio_cmd(name, cg, filename, phase, out_json, runtime, loops=None):
+def fio_cmd(name, cg, filename, phase, out_json, runtime, size, loops=None):
     parts = [
-        "fio", f"--name={name}", f"--filename={filename}",
+        "fio", f"--name={name}", f"--filename={filename}", f"--size={size}",
         f"--rw={phase['pattern']}", f"--bs={phase['block_size']}",
         f"--iodepth={phase['iodepth']}", f"--ioengine={phase['ioengine']}",
         f"--numjobs={phase['numjobs']}",
@@ -269,7 +269,7 @@ def fio_cmd(name, cg, filename, phase, out_json, runtime, loops=None):
             f"echo $$ > {CG}/{cg}/cgroup.procs; exec {fio} > /dev/null 2>&1"]
 
 
-def run_phase(idx, p1, p2, files, outdir, runtime, loops=None):
+def run_phase(idx, p1, p2, files, sizes, outdir, runtime, loops=None):
     j1 = f"{outdir}/phase{idx}_client1.json"
     j2 = f"{outdir}/phase{idx}_client2.json"
 
@@ -277,8 +277,8 @@ def run_phase(idx, p1, p2, files, outdir, runtime, loops=None):
 
     t0 = time.time()
     procs = [
-        subprocess.Popen(fio_cmd("client1", CGROUPS["client1"], files["client1"], p1, j1, runtime, loops)),
-        subprocess.Popen(fio_cmd("client2", CGROUPS["client2"], files["client2"], p2, j2, runtime, loops)),
+        subprocess.Popen(fio_cmd("client1", CGROUPS["client1"], files["client1"], p1, j1, runtime, sizes["client1"], loops)),
+        subprocess.Popen(fio_cmd("client2", CGROUPS["client2"], files["client2"], p2, j2, runtime, sizes["client2"], loops)),
     ]
     for pr in procs:
         pr.wait()
@@ -403,6 +403,7 @@ def main():
     c2_size = args.c2_size or cfg[c2_sec].get("file_size", "32G")
     files = {"client1": f"{args.data_dir}/client1_file",
              "client2": f"{args.data_dir}/client2_file"}
+    sizes = {"client1": c1_size, "client2": c2_size}
     print("Preparing test files:")
     ensure_file(files["client1"], c1_size)
     ensure_file(files["client2"], c2_size)
@@ -441,7 +442,7 @@ def main():
             p1 = p1_phases[min(i, len(p1_phases) - 1)]
             p2 = p2_phases[min(i, len(p2_phases) - 1)]
             rt = args.runtime or int(p1["runtime"])
-            run_phase(i, p1, p2, files, args.output, rt, args.loops)
+            run_phase(i, p1, p2, files, sizes, args.output, rt, args.loops)
     finally:
         iostat.terminate()
         iostat.wait()

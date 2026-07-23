@@ -204,9 +204,9 @@ def cleanup_cgroups():
 # --------------------------------------------------------------------------- #
 # fio launching
 # --------------------------------------------------------------------------- #
-def fio_cmd(name, cg_rel, filename, phase, out_json, runtime):
+def fio_cmd(name, cg_rel, filename, phase, out_json, runtime, size):
     parts = [
-        "fio", f"--name={name}", f"--filename={filename}",
+        "fio", f"--name={name}", f"--filename={filename}", f"--size={size}",
         f"--rw={phase['pattern']}", f"--bs={phase['block_size']}",
         f"--iodepth={phase['iodepth']}", f"--ioengine={phase['ioengine']}",
         f"--numjobs={phase['numjobs']}", f"--runtime={runtime}",
@@ -223,7 +223,7 @@ def fio_cmd(name, cg_rel, filename, phase, out_json, runtime):
             f"> /dev/null 2>&1"]
 
 
-def run_phase(idx, p1, p2, files, outdir, runtime):
+def run_phase(idx, p1, p2, files, sizes, outdir, runtime):
     j1 = f"{outdir}/phase{idx}_client1.json"
     j2 = f"{outdir}/phase{idx}_client2.json"
 
@@ -232,8 +232,8 @@ def run_phase(idx, p1, p2, files, outdir, runtime):
 
     t0 = time.time()
     procs = [
-        subprocess.Popen(fio_cmd("client1", "client1", files["client1"], p1, j1, runtime)),
-        subprocess.Popen(fio_cmd("client2", "client2", files["client2"], p2, j2, runtime)),
+        subprocess.Popen(fio_cmd("client1", "client1", files["client1"], p1, j1, runtime, sizes["client1"])),
+        subprocess.Popen(fio_cmd("client2", "client2", files["client2"], p2, j2, runtime, sizes["client2"])),
     ]
     for pr in procs:
         pr.wait()
@@ -343,6 +343,7 @@ def main():
     c2_size = args.c2_size or cfg[c2_sec].get("file_size", "32G")
     files = {"client1": f"{args.data_dir}/client1_file",
              "client2": f"{args.data_dir}/client2_file"}
+    sizes = {"client1": c1_size, "client2": c2_size}
     print("Preparing test files:")
     ensure_file(files["client1"], c1_size)
     ensure_file(files["client2"], c2_size)
@@ -380,7 +381,7 @@ def main():
             p1 = p1_phases[min(i, len(p1_phases) - 1)]
             p2 = p2_phases[min(i, len(p2_phases) - 1)]
             rt = args.runtime or int(p1["runtime"])
-            run_phase(i, p1, p2, files, args.output, rt)
+            run_phase(i, p1, p2, files, sizes, args.output, rt)
     finally:
         iostat.terminate()
         iostat.wait()
