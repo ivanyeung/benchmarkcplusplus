@@ -26,6 +26,7 @@ struct PhaseConfig {
     int numjobs;          // Per-phase numjobs (0 = use workload default)
     std::string file_size; // Per-phase file_size (empty = use workload default)
     int rate_iops;        // Per-phase rate_iops (0 = unlimited)
+    std::string warmup;    // "sequential" = one full sequential pass first (empty = none)
 };
 
 struct WorkloadConfig {
@@ -533,6 +534,39 @@ private:
                     phase_info += ")";
                     log(phase_info);
 
+                    // Optional sequential warmup: one full pass over the file
+                    // (loops=1, no time cap, no rate cap, sequential, buffered)
+                    // to prime the page cache before the measured workload. Its
+                    // results are saved separately to <phase_name>_seq.json so the
+                    // measured phase JSON stays clean.
+                    if (phase.warmup == "sequential") {
+                        std::string warmup_output = output_dir + "/" + phase_name + "_seq.json";
+                        std::ostringstream warmup_cmd;
+                        warmup_cmd << "fio"
+                                   << " --name=" << phase_name << "_warmup"
+                                   << " --filename=" << phase_test_file
+                                   << " --size=" << phase_file_size
+                                   << " --loops=1"
+                                   << " --rw=read"
+                                   << " --bs=" << phase.block_size
+                                   << " --numjobs=1"
+                                   << " --iodepth=" << phase.iodepth;
+                        if (!phase.ioengine.empty()) {
+                            warmup_cmd << " --ioengine=" << phase.ioengine;
+                        }
+                        warmup_cmd << " --group_reporting=1"
+                                   << " --output-format=json"
+                                   << " --output=" << warmup_output;
+                        log("    Phase " + std::to_string(phase_idx + 1) +
+                            " warmup: 1 sequential pass over " + phase_file_size);
+                        if (verbose) {
+                            log("    Executing: " + warmup_cmd.str());
+                            run_system(warmup_cmd.str());
+                        } else {
+                            run_system(warmup_cmd.str() + " >/dev/null 2>&1");
+                        }
+                    }
+
                     // Build fio command for this phase
                     std::ostringstream fio_cmd;
                     fio_cmd << "fio"
@@ -932,7 +966,7 @@ private:
 
                         // Initialize phase if needed
                         if (phase_map.find(phase_num) == phase_map.end()) {
-                            phase_map[phase_num] = PhaseConfig{0, "", 0, "", "", 0, "", 0};
+                            phase_map[phase_num] = PhaseConfig{0, "", 0, "", "", 0, "", 0, ""};
                         }
 
                         if (param == "runtime") phase_map[phase_num].runtime = std::stoi(value);
@@ -943,6 +977,7 @@ private:
                         else if (param == "numjobs") phase_map[phase_num].numjobs = std::stoi(value);
                         else if (param == "file_size") phase_map[phase_num].file_size = value;
                         else if (param == "rate_iops") phase_map[phase_num].rate_iops = std::stoi(value);
+                        else if (param == "warmup") phase_map[phase_num].warmup = value;
                     }
                 }
                 // Legacy single-phase parameters

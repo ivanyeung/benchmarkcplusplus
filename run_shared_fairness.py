@@ -160,6 +160,10 @@ def parse_phases(cfg, section):
             "rate_iops": g("rate_iops"),
             "iodepth": g("iodepth", "16"),
             "ioengine": g("ioengine", "libaio"),
+            # Optional: "sequential" -> do ONE full sequential pass over the file
+            # (loops=1, no time cap, full speed) before the measured workload, to
+            # warm the page cache. Metrics from the warmup are discarded.
+            "warmup": g("warmup"),
         })
     return phases
 
@@ -216,11 +220,30 @@ def fio_cmd(name, cg_rel, filename, phase, out_json, runtime, size):
     if phase.get("rate_iops"):
         parts.append(f"--rate_iops={phase['rate_iops']}")
     fio = " ".join(parts)
+
+    # Optional sequential warmup: one full pass over the file (loops=1, no time
+    # cap, no rate cap, sequential) to prime the page cache before the measured
+    # workload. Its fio JSON is kept in a separate "<out>_seq.json" file, so the
+    # measured random-read JSON (out_json) stays clean while the warmup results
+    # are still recorded.
+    warmup_cmd = ""
+    if phase.get("warmup") == "sequential":
+        warmup_json = out_json.replace(".json", "_seq.json")
+        warmup = " ".join([
+            "fio", f"--name={name}_warmup", f"--filename={filename}",
+            f"--size={size}", "--rw=read", f"--bs={phase['block_size']}",
+            f"--iodepth={phase['iodepth']}", f"--ioengine={phase['ioengine']}",
+            "--numjobs=1", "--loops=1", "--direct=0", "--group_reporting",
+            "--output-format=json", f"--output={warmup_json}",
+        ])
+        warmup_cmd = f"{warmup} > /dev/null 2>&1; "
+
     # Move the shell into the target cgroup, then exec fio so all I/O is charged
-    # to that cgroup (avoids the PID-migration race).
+    # to that cgroup (avoids the PID-migration race). The warmup (if any) runs in
+    # the same cgroup first; only the final measured fio is exec'd.
     return ["bash", "-c",
-            f"echo $$ > {CG}/{PARENT}/{cg_rel}/cgroup.procs; exec {fio} "
-            f"> /dev/null 2>&1"]
+            f"echo $$ > {CG}/{PARENT}/{cg_rel}/cgroup.procs; "
+            f"{warmup_cmd}exec {fio} > /dev/null 2>&1"]
 
 
 def run_phase(idx, p1, p2, files, sizes, outdir, runtime):
