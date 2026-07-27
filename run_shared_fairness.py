@@ -214,7 +214,11 @@ def fio_cmd(name, cg_rel, filename, phase, out_json, runtime, size):
         f"--rw={phase['pattern']}", f"--bs={phase['block_size']}",
         f"--iodepth={phase['iodepth']}", f"--ioengine={phase['ioengine']}",
         f"--numjobs={phase['numjobs']}", f"--runtime={runtime}",
-        "--time_based", "--direct=0", "--group_reporting",
+        # --invalidate=0: do NOT drop the file's page cache at job start. fio
+        # defaults invalidate=1 (POSIX_FADV_DONTNEED before I/O), which would
+        # discard the warmup's cached pages and defeat the "no drop between
+        # phases" design — every metric would then look like a cold start.
+        "--time_based", "--direct=0", "--invalidate=0", "--group_reporting",
         "--output-format=json", f"--output={out_json}",
     ]
     if phase.get("rate_iops"):
@@ -233,7 +237,8 @@ def fio_cmd(name, cg_rel, filename, phase, out_json, runtime, size):
             "fio", f"--name={name}_warmup", f"--filename={filename}",
             f"--size={size}", "--rw=read", f"--bs={phase['block_size']}",
             f"--iodepth={phase['iodepth']}", f"--ioengine={phase['ioengine']}",
-            "--numjobs=1", "--loops=1", "--direct=0", "--group_reporting",
+            "--numjobs=1", "--loops=1", "--direct=0", "--invalidate=0",
+            "--group_reporting",
             "--output-format=json", f"--output={warmup_json}",
         ])
         warmup_cmd = f"{warmup} > /dev/null 2>&1; "
